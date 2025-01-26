@@ -16,14 +16,14 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi import Request
 import browser_history
-
 from .database import (
     get_db,
     HistoryEntry,
     Bookmark,
     get_last_processed_timestamp,
     update_last_processed_timestamp,
-    create_tables
+    create_tables,
+    engine
 )
 from .scheduler import HistoryScheduler
 from .page_info import PageInfo
@@ -106,60 +106,83 @@ def serialize_bookmark(bookmark):
 @app.get("/history/search")
 async def search_history(
     domain: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     search_term: Optional[str] = Query(None),
     include_content: bool = Query(False),
     db: Session = Depends(get_db)
 ):
     """Search history with optimized full-text search"""
     try:
-        # If there's a full-text search term, use the FTS table
         if search_term:
-            # Use raw SQL for FTS query to leverage SQLite's optimization
+            # Optimize FTS query with content-focused ranking
             fts_query = """
-                SELECT h.* FROM history h
-                INNER JOIN history_fts f ON h.id = f.rowid
-                WHERE history_fts MATCH :search
-                AND (:domain IS NULL OR h.domain = :domain)
-                AND (:start_date IS NULL OR h.visit_time >= :start_date)
-                AND (:end_date IS NULL OR h.visit_time <= :end_date)
-                ORDER BY rank
-                LIMIT 1000
+                WITH RECURSIVE
+                ranked_results AS (
+                    SELECT
+                        h.*,
+                        rank * (
+                            CASE
+                                -- Boost exact phrase matches in content
+                                WHEN h.markdown_content LIKE :exact_pattern THEN 3.0
+                                -- Boost title matches but less than content
+                                WHEN h.title LIKE :like_pattern THEN 1.5
+                                -- Base score for other matches
+                                ELSE 1.0
+                            END
+                        ) + (
+                            -- Additional boost for recent entries
+                            CAST(strftime('%s', h.visit_time) AS INTEGER) /
+                            CAST(strftime('%s', 'now') AS INTEGER) * 0.5
+                        ) as final_rank
+                    FROM history h
+                    INNER JOIN history_fts f ON h.id = f.rowid
+                    WHERE history_fts MATCH :search
+                    AND (:domain IS NULL OR h.domain = :domain)
+                    AND (:start_date IS NULL OR h.visit_time >= :start_date)
+                    AND (:end_date IS NULL OR h.visit_time <= :end_date)
+                )
+                SELECT * FROM ranked_results
+                ORDER BY final_rank DESC
+                LIMIT 100
             """
-            results = db.execute(
-                text(fts_query),
-                {
-                    'search': search_term,
-                    'domain': domain,
-                    'start_date': start_date,
-                    'end_date': end_date
-                }
-            ).all()
 
-            # Return serialized results directly
-            return [serialize_history_entry(row, include_content) for row in results]
+            # Prepare parameters with exact phrase matching
+            params = {
+                'search': search_term,
+                'like_pattern': f'%{search_term}%',
+                'exact_pattern': f'%{search_term}%',  # For exact phrase matching
+                'domain': domain,
+                'start_date': start_date,
+                'end_date': end_date
+            }
+
+            # Execute with connection context manager
+            with engine.connect() as connection:
+                results = connection.execute(text(fts_query), params).all()
+                return [serialize_history_entry(row, include_content) for row in results]
         else:
-            # Start with base query
+            # Optimize non-FTS query
             query = db.query(HistoryEntry)
 
-            # Apply filters
             if domain:
                 query = query.filter(HistoryEntry.domain == domain)
-
             if start_date:
                 query = query.filter(HistoryEntry.visit_time >= start_date)
-
             if end_date:
                 query = query.filter(HistoryEntry.visit_time <= end_date)
 
-            # Execute query with limit for better performance
-            entries = query.limit(1000).all()
+            # Add index hints and limit
+            query = query.with_hint(HistoryEntry, 'INDEXED BY ix_history_visit_time', 'sqlite')
+            entries = query.order_by(HistoryEntry.visit_time.desc()).limit(100).all()
             return [serialize_history_entry(entry, include_content) for entry in entries]
 
     except Exception as e:
-        print(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail="Search operation failed")
+        logger.error(f"Search error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "Search operation failed", "error": str(e)}
+        )
 
 @app.get("/bookmarks/search")
 async def search_bookmarks(

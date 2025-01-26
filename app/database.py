@@ -13,10 +13,11 @@ engine = create_engine(
         "timeout": 30,  # Connection timeout in seconds
         "check_same_thread": False,  # Allow multi-threaded access
     },
-    # Enable write-ahead logging and set a larger pool size
-    pool_size=1,  # Single connection pool since we're using one connection
-    max_overflow=0,  # Prevent additional connections
-    pool_recycle=3600,  # Recycle connection every hour
+    # Update pool configuration for better concurrency
+    pool_size=5,  # Increase pool size to handle concurrent requests
+    max_overflow=10,  # Allow some overflow connections
+    pool_timeout=30,  # Connection timeout from pool
+    pool_recycle=3600,  # Recycle connections every hour
 )
 
 SessionLocal = sessionmaker(
