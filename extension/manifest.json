@@ -1,8 +1,12 @@
 {
   "manifest_version": 2,
-  "name": "Page Content Sender",
+  "name": "Browser Recall Helper",
   "version": "1.0",
-  "description": "Sends page content via WebSocket when a page loads",
+  "description": "Sends page visited content to the browser recall server to be saved as markdown",
+  "icons": {
+    "48": "icon.png",
+    "96": "icon.png"
+  },
   "permissions": [
     "webNavigation",
     "activeTab",
