@@ -15,8 +15,16 @@ from .logging_config import setup_logger
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi import Request
+import browser_history
 
-from .database import get_db, HistoryEntry, Bookmark
+from .database import (
+    get_db,
+    HistoryEntry,
+    Bookmark,
+    get_last_processed_timestamp,
+    update_last_processed_timestamp,
+    create_tables
+)
 from .scheduler import HistoryScheduler
 from .page_info import PageInfo
 from .page_reader import PageReader
@@ -43,10 +51,22 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting application")
-    # Initial bookmark fetch
-    await scheduler.update_bookmarks()
-    # Start the background task
-    asyncio.create_task(scheduler.update_history())
+
+    # Create necessary tables
+    create_tables()
+
+    # Initial history and bookmark fetch
+    try:
+        # Process history
+        process_browser_history()
+
+        # Process bookmarks
+        await scheduler.update_bookmarks()
+
+        # Start the background tasks
+        asyncio.create_task(scheduler.update_history())
+    except Exception as e:
+        logger.error(f"Error during startup: {str(e)}")
 
 def serialize_history_entry(entry, include_content: bool = False):
     """Serialize a HistoryEntry object to a dictionary"""
@@ -379,3 +399,58 @@ async def bookmarks_page(request: Request, db: Session = Depends(get_db)):
         "bookmarks.html",
         {"request": request, "bookmarks": bookmarks}
     )
+
+def process_browser_history():
+    try:
+        logger.info("Starting browser history processing")
+        outputs = browser_history.get_history()
+        history_list = outputs.histories  # This is a list of tuples (timestamp, url, title)
+        logger.info(f"Found {len(history_list)} total history items")
+
+        current_timestamp = int(datetime.now().timestamp())
+        source_key = "browser_history"  # Single source since we get combined history
+        last_timestamp = get_last_processed_timestamp(source_key)
+
+        logger.info(f"Last processed timestamp: {last_timestamp}")
+
+        # Filter for only new entries
+        new_entries = [
+            entry for entry in history_list
+            if entry[0].timestamp() > last_timestamp
+        ]
+
+        logger.info(f"Found {len(new_entries)} new entries")
+
+        if new_entries:
+            for timestamp, url, title in new_entries:
+                logger.info(f"Processing entry: {timestamp} - {url}")
+                domain = urlparse(url).netloc
+                if config.is_domain_ignored(domain):
+                    logger.debug(f"Skipping ignored domain: {domain}")
+                    continue
+
+                # Create history entry
+                db = next(get_db())
+                try:
+                    history_entry = HistoryEntry(
+                        url=url,
+                        title=title,
+                        visit_time=timestamp,
+                        domain=domain
+                    )
+                    db.add(history_entry)
+                    db.commit()
+                except Exception as e:
+                    logger.error(f"Error storing history item: {str(e)}")
+                    db.rollback()
+                finally:
+                    db.close()
+
+            # Update the last processed timestamp
+            update_last_processed_timestamp(source_key, current_timestamp)
+            logger.info(f"Updated timestamp to {current_timestamp}")
+
+        logger.info(f"Processed {len(new_entries)} new items")
+
+    except Exception as e:
+        logger.error(f"Error processing browser history: {str(e)}", exc_info=True)

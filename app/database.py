@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, event
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -141,5 +141,51 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    finally:
+        db.close()
+
+def get_last_processed_timestamp(source):
+    """
+    Get last processed timestamp for a source (e.g., 'chrome_history', 'chrome_bookmarks')
+    """
+    db = next(get_db())
+    try:
+        result = db.execute(
+            text('SELECT last_timestamp FROM last_processed WHERE source = :source'),
+            {'source': source}
+        ).fetchone()
+        return result[0] if result else 0
+    finally:
+        db.close()
+
+def update_last_processed_timestamp(source, timestamp):
+    """
+    Update last processed timestamp for a source
+    """
+    db = next(get_db())
+    try:
+        db.execute(
+            text('''
+                INSERT OR REPLACE INTO last_processed (source, last_timestamp)
+                VALUES (:source, :timestamp)
+            '''),
+            {'source': source, 'timestamp': timestamp}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+def create_tables():
+    db = next(get_db())
+    try:
+        db.execute(
+            text('''
+                CREATE TABLE IF NOT EXISTS last_processed (
+                    source TEXT PRIMARY KEY,
+                    last_timestamp INTEGER
+                )
+            ''')
+        )
+        db.commit()
     finally:
         db.close()
