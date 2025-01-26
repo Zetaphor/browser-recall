@@ -94,6 +94,11 @@ python main.py
 
 ## API Documentation
 
+The API documentation is available through FastAPI's interactive interface at `http://localhost:8523/docs`. This provides a complete API reference with:
+- Interactive endpoint testing
+- Request/response examples
+- Schema documentation
+
 ### History Endpoints
 
 - `GET /history/search`
