@@ -3,3 +3,4 @@ logs/
 *.db
 *.db-shm
 *.db-wal
+.amo-upload-uuid

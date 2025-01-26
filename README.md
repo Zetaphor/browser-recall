@@ -55,6 +55,15 @@ pip install -r requirements.txt
 ```
 
 4. Install the browser extension:
+
+Option A - Install from signed XPI file:
+   - Download the latest `.xpi` file from the releases page
+   - In Firefox, go to `about:addons`
+   - Click the gear icon and select "Install Add-on From File"
+   - Select the downloaded `.xpi` file
+   - Click "Add" when prompted
+
+Option B - Install temporarily for development:
    - Open Firefox
    - Navigate to `about:debugging`
    - Click "This Firefox"
