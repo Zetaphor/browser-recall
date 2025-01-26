@@ -4,33 +4,35 @@
 
 {% block content %}
 <div class="bg-dark-800 shadow sm:rounded-lg p-6 border border-dark-700">
-  <form id="search-form" class="space-y-6">
-    <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
+  <form id="search-form">
+    <div class="form-grid">
       <div>
-        <label for="search-term" class="block text-sm font-medium text-gray-300">Search Term</label>
-        <input type="text" name="search-term" id="search-term"
-          class="mt-1 block w-full rounded-md border-dark-600 bg-dark-700 text-gray-100 shadow-sm focus:border-primary focus:ring-primary">
+        <label for="search-term" class="form-label">Search Term</label>
+        <input type="text" name="search-term" id="search-term" placeholder="Enter search terms..."
+          class="form-input w-full rounded-md">
       </div>
       <div>
-        <label for="domain" class="block text-sm font-medium text-gray-300">Domain</label>
-        <input type="text" name="domain" id="domain"
-          class="mt-1 block w-full rounded-md border-dark-600 bg-dark-700 text-gray-100 shadow-sm focus:border-primary focus:ring-primary">
+        <label for="domain" class="form-label">Domain</label>
+        <input type="text" name="domain" id="domain" placeholder="example.com" class="form-input w-full rounded-md">
       </div>
       <div>
-        <label for="start-date" class="block text-sm font-medium text-gray-300">Start Date</label>
-        <input type="date" name="start-date" id="start-date"
-          class="mt-1 block w-full rounded-md border-dark-600 bg-dark-700 text-gray-100 shadow-sm focus:border-primary focus:ring-primary">
+        <label for="start-date" class="form-label">Start Date</label>
+        <input type="date" name="start-date" id="start-date" class="form-input w-full rounded-md">
       </div>
       <div>
-        <label for="end-date" class="block text-sm font-medium text-gray-300">End Date</label>
-        <input type="date" name="end-date" id="end-date"
-          class="mt-1 block w-full rounded-md border-dark-600 bg-dark-700 text-gray-100 shadow-sm focus:border-primary focus:ring-primary">
+        <label for="end-date" class="form-label">End Date</label>
+        <input type="date" name="end-date" id="end-date" class="form-input w-full rounded-md">
       </div>
     </div>
     <div class="flex justify-end">
-      <button type="submit"
-        class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
-        Search
+      <button type="submit" class="search-button">
+        <span class="flex items-center">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          Search
+        </span>
       </button>
     </div>
   </form>
@@ -44,7 +46,49 @@
   </div>
 </div>
 
+<!-- Add Marked.js -->
+<script src="{{ url_for('static', path='/js/marked.min.js') }}"></script>
+
 <script>
+  // Configure marked for security
+  marked.setOptions({
+    headerIds: false,
+    mangle: false
+  });
+
+  function highlightSearchTerm(text, searchTerm) {
+    if (!searchTerm || !text) return text;
+    const regex = new RegExp(`(${searchTerm})`, 'gi');
+    return text.replace(regex, '<mark class="highlight-search">$1</mark>');
+  }
+
+  function getPreviewAroundMatch(text, searchTerm) {
+    if (!text || !searchTerm) return '';
+
+    const regex = new RegExp(searchTerm, 'i');
+    const match = text.match(regex);
+    if (!match) return text.slice(0, 200) + '...';
+
+    const matchIndex = match.index;
+    const previewLength = 150;
+    const start = Math.max(0, matchIndex - previewLength);
+    const end = Math.min(text.length, matchIndex + match[0].length + previewLength);
+
+    let preview = text.slice(start, end);
+    if (start > 0) preview = '...' + preview;
+    if (end < text.length) preview = preview + '...';
+
+    return preview;
+  }
+
+  function toggleContent(button, contentId) {
+    const content = document.getElementById(contentId);
+    const isCollapsed = content.classList.contains('collapsed');
+
+    content.classList.toggle('collapsed');
+    button.textContent = isCollapsed ? 'Show Less' : 'Show More';
+  }
+
   document.getElementById('search-form').addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -58,25 +102,53 @@
     if (domain) params.append('domain', domain);
     if (startDate) params.append('start_date', startDate);
     if (endDate) params.append('end_date', endDate);
+    params.append('include_content', 'true');
 
     const response = await fetch(`/history/search?${params.toString()}`);
     const results = await response.json();
 
     const resultsContainer = document.getElementById('search-results');
-    resultsContainer.innerHTML = results.map(entry => `
-        <li class="px-4 py-4">
-            <div class="flex items-center justify-between">
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-primary truncate">
-                        <a href="${entry.url}" target="_blank">${entry.title}</a>
-                    </p>
-                    <p class="text-sm text-gray-500">
-                        ${entry.domain} • ${new Date(entry.visit_time).toLocaleString()}
-                    </p>
-                </div>
+    resultsContainer.innerHTML = results.map((entry, index) => {
+      let contentHtml = '';
+
+      if (entry.markdown_content) {
+        const preview = getPreviewAroundMatch(entry.markdown_content, searchTerm);
+        const fullContent = marked.parse(highlightSearchTerm(entry.markdown_content, searchTerm));
+        const previewHtml = marked.parse(highlightSearchTerm(preview, searchTerm));
+
+        contentHtml = `
+          <div class="mt-2 text-sm text-gray-300">
+            <div id="content-${index}" class="preview-text prose prose-invert max-w-none collapsed">
+              ${fullContent}
             </div>
+            <div class="mt-2">
+              <button
+                onclick="toggleContent(this, 'content-${index}')"
+                class="expand-button"
+              >
+                Show More
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <li class="px-4 py-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between mb-2">
+              <p class="text-sm font-medium text-primary truncate">
+                <a href="${entry.url}" target="_blank">${highlightSearchTerm(entry.title, searchTerm)}</a>
+              </p>
+              <p class="text-sm text-gray-400 ml-4">
+                ${entry.domain} • ${new Date(entry.visit_time).toLocaleString()}
+              </p>
+            </div>
+            ${contentHtml}
+          </div>
         </li>
-    `).join('');
+      `;
+    }).join('');
   });
 </script>
 {% endblock %}
