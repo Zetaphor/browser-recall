@@ -1,6 +1,14 @@
 fastapi
 uvicorn
 sqlalchemy
+jinja2
+python-multipart
+aiofiles
+websockets
+beautifulsoup4
+markdown
+python-iso8601
+pytz
 browser-history
 beautifulsoup4>=4.9.3
 markdownify

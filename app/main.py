@@ -12,6 +12,9 @@ from bs4 import BeautifulSoup
 from sqlalchemy import text
 from sqlalchemy.sql import text
 from .logging_config import setup_logger
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from fastapi import Request
 
 from .database import get_db, HistoryEntry, Bookmark
 from .scheduler import HistoryScheduler
@@ -33,6 +36,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+templates = Jinja2Templates(directory="app/templates")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 @app.on_event("startup")
 async def startup_event():
@@ -343,3 +349,33 @@ async def remove_ignored_domain(pattern: str):
     """Remove a domain pattern from ignored list"""
     config.remove_ignored_domain(pattern)
     return {"status": "success", "message": f"Removed pattern: {pattern}"}
+
+@app.get("/")
+async def home(request: Request, db: Session = Depends(get_db)):
+    # Get recent history entries
+    entries = db.query(HistoryEntry)\
+        .order_by(HistoryEntry.visit_time.desc())\
+        .limit(50)\
+        .all()
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "entries": entries}
+    )
+
+@app.get("/search")
+async def search_page(request: Request):
+    return templates.TemplateResponse(
+        "search.html",
+        {"request": request}
+    )
+
+@app.get("/bookmarks")
+async def bookmarks_page(request: Request, db: Session = Depends(get_db)):
+    bookmarks = db.query(Bookmark)\
+        .order_by(Bookmark.added_time.desc())\
+        .limit(50)\
+        .all()
+    return templates.TemplateResponse(
+        "bookmarks.html",
+        {"request": request, "bookmarks": bookmarks}
+    )

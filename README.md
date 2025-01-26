@@ -86,11 +86,29 @@ python main.py
    - Send content to the backend server
    - Update history and bookmarks
 
-3. Access the API endpoints:
+3. Access the web interface:
+   - Home page: `http://localhost:8523/`
+   - Search interface: `http://localhost:8523/search`
+   - Bookmarks page: `http://localhost:8523/bookmarks`
+
+4. Access the API endpoints:
    - Search history: `GET /history/search`
    - Search bookmarks: `GET /bookmarks/search`
    - Advanced search: `GET /history/search/advanced`
    - Manage ignored domains: `GET/POST/DELETE /config/ignored-domains`
+
+## Web Interface
+
+Browser Recall includes a basic web interface for viewing and searching your browsing history and bookmarks:
+
+- **Home Page**: Displays recent browsing history
+- **Search Page**: Provides a form interface for searching history with filters
+- **Bookmarks Page**: Shows your browser bookmarks
+
+The interface is built with:
+- Tailwind CSS for styling
+- Responsive design for mobile and desktop
+- Dark mode for comfortable viewing
 
 ## API Documentation
 

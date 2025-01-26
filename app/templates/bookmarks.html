@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Browser History - Bookmarks{% endblock %}
+
+{% block content %}
+<div class="bg-dark-800 shadow overflow-hidden sm:rounded-lg border border-dark-700">
+  <div class="px-4 py-5 sm:px-6">
+    <h3 class="text-lg leading-6 font-medium text-gray-100">Bookmarks</h3>
+  </div>
+  <div class="border-t border-dark-700">
+    <ul class="divide-y divide-gray-200" id="bookmarks-list">
+      {% for bookmark in bookmarks %}
+      <li class="px-4 py-4">
+        <div class="flex items-center justify-between">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-primary truncate">
+              <a href="{{ bookmark.url }}" target="_blank">{{ bookmark.title }}</a>
+            </p>
+            <p class="text-sm text-gray-400">
+              {{ bookmark.domain }} • {{ bookmark.added_time }}
+              {% if bookmark.folder %}
+              <span class="ml-2 px-2 py-1 text-xs rounded-full bg-dark-700 text-gray-300">{{ bookmark.folder }}</span>
+              {% endif %}
+            </p>
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}
