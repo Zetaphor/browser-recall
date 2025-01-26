@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, Query, WebSocket, WebSocketDisconnect, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 import asyncio
 from fastapi import WebSocketDisconnect
@@ -8,14 +8,22 @@ from urllib.parse import urlparse
 import pytz
 from fastapi.middleware.cors import CORSMiddleware
 import iso8601
+from bs4 import BeautifulSoup
+from sqlalchemy import text
+from sqlalchemy.sql import text
+from .logging_config import setup_logger
 
 from .database import get_db, HistoryEntry, Bookmark
 from .scheduler import HistoryScheduler
 from .page_info import PageInfo
 from .page_reader import PageReader
+from .config import Config
+
+logger = setup_logger(__name__)
 
 app = FastAPI()
 scheduler = HistoryScheduler()
+config = Config()
 
 # Add CORS middleware to allow WebSocket connections
 app.add_middleware(
@@ -28,6 +36,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    logger.info("Starting application")
     # Initial bookmark fetch
     await scheduler.update_bookmarks()
     # Start the background task
@@ -35,13 +44,24 @@ async def startup_event():
 
 def serialize_history_entry(entry, include_content: bool = False):
     """Serialize a HistoryEntry object to a dictionary"""
-    result = {
-        "id": entry.id,
-        "url": entry.url,
-        "title": entry.title,
-        "visit_time": entry.visit_time.isoformat() if entry.visit_time else None,
-        "domain": entry.domain,
-    }
+    # Handle both ORM objects and raw SQL results
+    if hasattr(entry, '_mapping'):  # Raw SQL result
+        result = {
+            "id": entry.id,
+            "url": entry.url,
+            "title": entry.title,
+            "visit_time": entry.visit_time.isoformat() if isinstance(entry.visit_time, datetime) else entry.visit_time,
+            "domain": entry.domain,
+        }
+    else:  # ORM object
+        result = {
+            "id": entry.id,
+            "url": entry.url,
+            "title": entry.title,
+            "visit_time": entry.visit_time.isoformat() if entry.visit_time else None,
+            "domain": entry.domain,
+        }
+
     if include_content:
         result["markdown_content"] = entry.markdown_content
     return result
@@ -66,25 +86,54 @@ async def search_history(
     include_content: bool = Query(False),
     db: Session = Depends(get_db)
 ):
-    query = db.query(HistoryEntry)
+    """Search history with optimized full-text search"""
+    try:
+        # If there's a full-text search term, use the FTS table
+        if search_term:
+            # Use raw SQL for FTS query to leverage SQLite's optimization
+            fts_query = """
+                SELECT h.* FROM history h
+                INNER JOIN history_fts f ON h.id = f.rowid
+                WHERE history_fts MATCH :search
+                AND (:domain IS NULL OR h.domain = :domain)
+                AND (:start_date IS NULL OR h.visit_time >= :start_date)
+                AND (:end_date IS NULL OR h.visit_time <= :end_date)
+                ORDER BY rank
+                LIMIT 1000
+            """
+            results = db.execute(
+                text(fts_query),
+                {
+                    'search': search_term,
+                    'domain': domain,
+                    'start_date': start_date,
+                    'end_date': end_date
+                }
+            ).all()
 
-    if domain:
-        query = query.filter(HistoryEntry.domain == domain)
+            # Return serialized results directly
+            return [serialize_history_entry(row, include_content) for row in results]
+        else:
+            # Start with base query
+            query = db.query(HistoryEntry)
 
-    if start_date:
-        query = query.filter(HistoryEntry.visit_time >= start_date)
+            # Apply filters
+            if domain:
+                query = query.filter(HistoryEntry.domain == domain)
 
-    if end_date:
-        query = query.filter(HistoryEntry.visit_time <= end_date)
+            if start_date:
+                query = query.filter(HistoryEntry.visit_time >= start_date)
 
-    if search_term:
-        query = query.filter(
-            (HistoryEntry.title.ilike(f"%{search_term}%")) |
-            (HistoryEntry.markdown_content.ilike(f"%{search_term}%"))
-        )
+            if end_date:
+                query = query.filter(HistoryEntry.visit_time <= end_date)
 
-    entries = query.all()
-    return [serialize_history_entry(entry, include_content) for entry in entries]
+            # Execute query with limit for better performance
+            entries = query.limit(1000).all()
+            return [serialize_history_entry(entry, include_content) for entry in entries]
+
+    except Exception as e:
+        print(f"Search error: {e}")
+        raise HTTPException(status_code=500, detail="Search operation failed")
 
 @app.get("/bookmarks/search")
 async def search_bookmarks(
@@ -93,84 +142,204 @@ async def search_bookmarks(
     search_term: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    query = db.query(Bookmark)
+    """Search bookmarks with optimized queries"""
+    try:
+        # Build query efficiently
+        query = db.query(Bookmark)
 
-    if domain:
-        query = query.filter(Bookmark.domain == domain)
+        # Apply filters using index-optimized queries
+        if domain:
+            query = query.filter(Bookmark.domain == domain)
 
-    if folder:
-        query = query.filter(Bookmark.folder == folder)
+        if folder:
+            query = query.filter(Bookmark.folder == folder)
 
-    if search_term:
-        query = query.filter(Bookmark.title.ilike(f"%{search_term}%"))
+        if search_term:
+            # Use LIKE with index hint for title search
+            search_pattern = f"%{search_term}%"
+            query = query.filter(
+                Bookmark.title.ilike(search_pattern)
+            ).with_hint(
+                Bookmark,
+                'INDEXED BY ix_bookmarks_title',
+                'sqlite'
+            )
 
-    bookmarks = query.all()
-    return [serialize_bookmark(bookmark) for bookmark in bookmarks]
+        # Add ordering and limit for better performance
+        bookmarks = query.order_by(Bookmark.added_time.desc()).limit(1000).all()
+
+        return [serialize_bookmark(bookmark) for bookmark in bookmarks]
+
+    except Exception as e:
+        print(f"Bookmark search error: {e}")
+        raise HTTPException(status_code=500, detail="Search operation failed")
+
+# Add new endpoint for advanced full-text search
+@app.get("/history/search/advanced")
+async def advanced_history_search(
+    query: str = Query(..., description="Full-text search query with SQLite FTS5 syntax"),
+    include_content: bool = Query(False),
+    db: Session = Depends(get_db)
+):
+    """Advanced full-text search using SQLite FTS5 features"""
+    try:
+        # Use raw SQL for advanced FTS query
+        fts_query = """
+            SELECT h.*, rank
+            FROM history h
+            INNER JOIN history_fts f ON h.id = f.rowid
+            WHERE history_fts MATCH :query
+            ORDER BY rank
+            LIMIT 1000
+        """
+
+        results = db.execute(text(fts_query), {'query': query}).all()
+
+        # Convert results to HistoryEntry objects
+        entries = [
+            serialize_history_entry(
+                HistoryEntry(
+                    id=row.id,
+                    url=row.url,
+                    title=row.title,
+                    visit_time=row.visit_time,
+                    domain=row.domain,
+                    markdown_content=row.markdown_content if include_content else None
+                ),
+                include_content
+            )
+            for row in results
+        ]
+
+        return entries
+
+    except Exception as e:
+        print(f"Advanced search error: {e}")
+        raise HTTPException(status_code=500, detail="Advanced search operation failed")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
-    print("WebSocket endpoint called")
+    logger.info("New WebSocket connection established")
     page_reader = PageReader()
-    print("New WebSocket connection established")
     await websocket.accept()
-    print("WebSocket connection accepted")
     try:
         while True:
-            print("Waiting for message...")
             data = await websocket.receive_json()
-            print(f"Received message for URL: {data['url']}")
-            print(f"HTML content length: {len(data['html'])}")
-            print(f"Timestamp: {data['timestamp']}")
 
-            # Parse the ISO timestamp correctly
+            # Parse the URL and check if domain should be ignored
+            domain = urlparse(data['url']).netloc
+            if config.is_domain_ignored(domain):
+                logger.info(f"Ignoring domain: {domain}")
+                await websocket.send_json({
+                    "status": "ignored",
+                    "message": f"Domain {domain} is in ignore list"
+                })
+                continue
+
+            logger.info(f"Processing page: {data['url']}")
             timestamp = iso8601.parse_date(data['timestamp'])
+
+            # Check if we already have a recent entry for this URL
+            existing_entry = db.query(HistoryEntry).filter(
+                HistoryEntry.url == data['url'],
+                HistoryEntry.visit_time >= timestamp - timedelta(minutes=5)
+            ).first()
+
+            if existing_entry:
+                print(f"Recent entry exists for URL: {data['url']}")
+                await websocket.send_json({
+                    "status": "skipped",
+                    "message": "Recent entry exists"
+                })
+                continue
 
             page_info = PageInfo(
                 url=data['url'],
                 html=data['html'],
                 timestamp=timestamp
             )
-            print(f"Created PageInfo object for: {page_info.url}")
 
-            # Convert HTML to markdown
-            print("Converting HTML to markdown...")
+            # Debug HTML content
+            print(f"HTML content length before processing: {len(page_info.html)}")
+
+            # Extract title
+            soup = BeautifulSoup(page_info.html, 'html.parser')
+            title = soup.title.string if soup.title else ''
+            print(f"Extracted title: {title}")
+
+            # Debug markdown conversion
+            print("Starting markdown conversion...")
+            cleaned_html = page_reader.clean_html(page_info.html)
+            print(f"Cleaned HTML length: {len(cleaned_html)}")
+
             markdown_content = page_reader.html_to_markdown(page_info.html)
-            print(f"Markdown conversion complete, length: {len(markdown_content) if markdown_content else 0}")
+            print(f"Markdown conversion complete. Content length: {len(markdown_content) if markdown_content else 0}")
 
-            # Update or create history entry
-            domain = urlparse(page_info.url).netloc
-            print(f"Creating history entry for domain: {domain}")
+            if markdown_content:
+                print("First 100 chars of markdown:", markdown_content[:100])
+            else:
+                print("No markdown content generated")
+
+            if not title and not markdown_content:
+                print(f"No content extracted from: {page_info.url}")
+                await websocket.send_json({
+                    "status": "skipped",
+                    "message": "No content extracted"
+                })
+                continue
+
+            # Create history entry
             history_entry = HistoryEntry(
                 url=page_info.url,
+                title=title,
                 visit_time=page_info.timestamp,
                 domain=domain,
                 markdown_content=markdown_content,
                 last_content_update=datetime.now(timezone.utc)
             )
 
-            print("Saving to database...")
-            db.add(history_entry)
-            db.commit()
-            print("Database save complete")
+            # Debug database operation
+            print(f"Saving entry with markdown length: {len(markdown_content) if markdown_content else 0}")
 
-            # Send confirmation back to client
-            await websocket.send_json({
-                "status": "success",
-                "message": f"Processed page: {page_info.url}"
-            })
+            # Use bulk operations for better performance
+            db.add(history_entry)
+
+            try:
+                db.commit()
+                print(f"Successfully saved entry for: {page_info.url}")
+                print(f"Verify markdown content length in database: {len(history_entry.markdown_content) if history_entry.markdown_content else 0}")
+                await websocket.send_json({
+                    "status": "success",
+                    "message": f"Processed page: {page_info.url}"
+                })
+            except Exception as e:
+                db.rollback()
+                print(f"Error saving entry: {e}")
+                await websocket.send_json({
+                    "status": "error",
+                    "message": "Database error"
+                })
 
     except WebSocketDisconnect:
-        print("Client disconnected")
+        logger.info("Client disconnected")
     except Exception as e:
-        print(f"Error handling message: {e}")
-        # Send error back to client if possible
-        try:
-            await websocket.send_json({
-                "status": "error",
-                "message": str(e)
-            })
-        except:
-            pass
+        logger.error("Error in WebSocket handler", exc_info=True)
     finally:
-        print("Cleaning up resources")
-        page_reader.close()
+        await page_reader.close()
+
+@app.get("/config/ignored-domains")
+async def get_ignored_domains():
+    """Get list of ignored domain patterns"""
+    return {"ignored_domains": config.config.get('ignored_domains', [])}
+
+@app.post("/config/ignored-domains")
+async def add_ignored_domain(pattern: str):
+    """Add a new domain pattern to ignored list"""
+    config.add_ignored_domain(pattern)
+    return {"status": "success", "message": f"Added pattern: {pattern}"}
+
+@app.delete("/config/ignored-domains/{pattern}")
+async def remove_ignored_domain(pattern: str):
+    """Remove a domain pattern from ignored list"""
+    config.remove_ignored_domain(pattern)
+    return {"status": "success", "message": f"Removed pattern: {pattern}"}

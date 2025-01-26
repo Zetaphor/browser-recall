@@ -7,6 +7,9 @@ from .page_reader import PageReader
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 import pytz
+from .config import Config
+from .database import get_db
+from urllib.parse import urlparse
 
 class HistoryScheduler:
     def __init__(self):
@@ -14,6 +17,7 @@ class HistoryScheduler:
         self.page_reader = PageReader()
         self.last_history_update = None
         self.content_update_interval = timedelta(hours=24)  # Update content daily
+        self.config = Config()
 
     def _normalize_datetime(self, dt: datetime) -> datetime:
         """Convert datetime to UTC if it has timezone, or make it timezone-aware if it doesn't"""
@@ -28,81 +32,70 @@ class HistoryScheduler:
         return dt.astimezone(pytz.UTC)
 
     async def update_bookmarks(self):
-        bookmarks = self.browser_collector.fetch_bookmarks()
-
-        db = SessionLocal()
+        """Update bookmarks from browser"""
         try:
-            # First, get all existing URLs to avoid duplicates
-            existing_urls = {
-                url: (added_time, folder)
-                for url, added_time, folder in
-                db.query(Bookmark.url, Bookmark.added_time, Bookmark.folder).all()
-            }
+            db = next(get_db())
+            bookmarks = self.browser_collector.fetch_bookmarks()
 
-            new_entries = []
-            for added_time, url, title, folder in bookmarks:
+            for added_time, url, title, folder in bookmarks:  # Unpack the tuple
+                # Extract domain and check if it should be ignored
+                domain = urlparse(url).netloc
+                if self.config.is_domain_ignored(domain):
+                    continue
+
                 # Normalize the datetime
                 added_time = self._normalize_datetime(added_time)
 
-                # Only add if URL doesn't exist or if it's in a different folder
-                if (url not in existing_urls or
-                    existing_urls[url][1] != folder):
-                    domain = self.browser_collector.get_domain(url)
-                    entry = Bookmark(
-                        url=url,
-                        title=title,
-                        added_time=added_time,
-                        folder=folder,
-                        domain=domain
-                    )
-                    new_entries.append(entry)
+                # Process the bookmark only if domain is not ignored
+                bookmark_entry = Bookmark(
+                    url=url,
+                    title=title,
+                    added_time=added_time,
+                    folder=folder,
+                    domain=domain
+                )
+                db.add(bookmark_entry)
 
-            if new_entries:
-                db.bulk_save_objects(new_entries)
-                db.commit()
+            db.commit()
+
+        except Exception as e:
+            print(f"Error updating bookmarks: {e}")
         finally:
             db.close()
 
     async def update_history(self):
+        """Background task to update history periodically"""
         while True:
-            db = SessionLocal()
             try:
-                # Get the latest timestamp from our database
-                latest_entry = db.query(func.max(HistoryEntry.visit_time)).scalar()
-                if latest_entry:
-                    latest_entry = self._normalize_datetime(latest_entry)
+                db = next(get_db())
+                history_entries = self.browser_collector.fetch_history()
 
-                # Fetch new history
-                history = self.browser_collector.fetch_history()
+                for visit_time, url, title in history_entries:  # Unpack the tuple
+                    # Extract domain and check if it should be ignored
+                    domain = urlparse(url).netloc
+                    if self.config.is_domain_ignored(domain):
+                        continue
 
-                # Filter to only get entries newer than our latest entry
-                new_entries = []
-                for visit_time, url, title in history:
                     # Normalize the datetime
                     visit_time = self._normalize_datetime(visit_time)
 
-                    if not latest_entry or visit_time > latest_entry:
-                        domain = self.browser_collector.get_domain(url)
-                        entry = HistoryEntry(
-                            url=url,
-                            title=title,
-                            visit_time=visit_time,
-                            domain=domain
-                        )
-                        new_entries.append(entry)
+                    # Process the entry only if domain is not ignored
+                    history_entry = HistoryEntry(
+                        url=url,
+                        title=title,
+                        visit_time=visit_time,
+                        domain=domain
+                    )
+                    db.add(history_entry)
 
-                if new_entries:
-                    db.bulk_save_objects(new_entries)
-                    db.commit()
+                db.commit()
 
-                # Update bookmarks
-                await self.update_bookmarks()
-
+            except Exception as e:
+                print(f"Error updating history: {e}")
             finally:
                 db.close()
 
-            # Wait for 5 minutes before next update
-            await asyncio.sleep(300)
+            await asyncio.sleep(300)  # Wait 5 minutes before next update
 
     async def close(self):
         """Cleanup resources"""

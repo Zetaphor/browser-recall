@@ -2,9 +2,10 @@ fastapi
 uvicorn
 sqlalchemy
 browser-history
-beautifulsoup4
+beautifulsoup4>=4.9.3
 markdownify
-pyyaml
+pyyaml>=6.0.1
 pytz
 websockets==11.0.3
 iso8601==2.1.0
+lxml>=4.9.3

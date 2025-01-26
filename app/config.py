@@ -3,6 +3,44 @@ from pathlib import Path
 from typing import Set
 import fnmatch
 
+class Config:
+    def __init__(self):
+        self.config_path = Path(__file__).parent / "config.yaml"
+        self.load_config()
+
+    def load_config(self):
+        if not self.config_path.exists():
+            self.config = {"ignored_domains": []}
+            self.save_config()
+        else:
+            with open(self.config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+
+    def save_config(self):
+        with open(self.config_path, 'w') as f:
+            yaml.dump(self.config, f)
+
+    def is_domain_ignored(self, domain: str) -> bool:
+        """Check if a domain matches any of the ignored patterns"""
+        patterns = self.config.get('ignored_domains', [])
+        return any(fnmatch.fnmatch(domain.lower(), pattern.lower()) for pattern in patterns)
+
+    def add_ignored_domain(self, pattern: str):
+        """Add a new domain pattern to the ignored list"""
+        if 'ignored_domains' not in self.config:
+            self.config['ignored_domains'] = []
+        if pattern not in self.config['ignored_domains']:
+            self.config['ignored_domains'].append(pattern)
+            self.save_config()
+
+    def remove_ignored_domain(self, pattern: str):
+        """Remove a domain pattern from the ignored list"""
+        if 'ignored_domains' in self.config:
+            self.config['ignored_domains'] = [
+                p for p in self.config['ignored_domains'] if p != pattern
+            ]
+            self.save_config()
+
 class ReaderConfig:
     def __init__(self):
         self.excluded_patterns: Set[str] = set()
