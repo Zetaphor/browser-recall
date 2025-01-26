@@ -1,5 +1,8 @@
 #!/usr/bin/env fish
 
+# Change to the script's directory
+cd (dirname (status filename))
+
 # Activate the virtual environment and run main.py silently
 vf activate general
 python main.py > /dev/null 2>&1 &
