@@ -1,0 +1,15 @@
+# Domains to exclude from content reading
+excluded_domains:
+  # Local sites
+  - localhost
+  - 127.0.0.1
+
+  # IP ranges
+  - 192.168.*.*
+  - 10.*.*.*
+  - 172.16.*.*
+
+  # Example wildcard patterns
+  # - *.local
+  # - reddit-*.com
+  # - *.githubusercontent.com

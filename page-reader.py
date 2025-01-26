@@ -82,9 +82,3 @@ def html_to_markdown(url: str) -> str:
 
     # Clean up excessive whitespace
     return clean_whitespace(markdown)
-
-if __name__ == "__main__":
-    # Example usage
-    url = "https://reddit.com"
-    markdown_content = html_to_markdown(url)
-    print(markdown_content)

@@ -1,0 +1,35 @@
+{
+  "manifest_version": 2,
+  "name": "Page Content Sender",
+  "version": "1.0",
+  "description": "Sends page content via WebSocket when a page loads",
+  "permissions": [
+    "webNavigation",
+    "activeTab",
+    "<all_urls>",
+    "tabs"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "page-content-sender@example.com"
+    }
+  }
+}
