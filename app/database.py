@@ -95,14 +95,14 @@ def init_fts():
     conn = engine.raw_connection()
     cursor = conn.cursor()
 
-    # Create FTS table for history content
+    # Update FTS table configuration to use trigrams for better partial matching
     cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
             title,
             markdown_content,
             content='history',
             content_rowid='id',
-            tokenize='porter unicode61'
+            tokenize='trigram'
         )
     """)
 
@@ -136,6 +136,15 @@ def init_fts():
 
 # Initialize FTS tables
 init_fts()
+
+def reindex_fts():
+    """Reindex the FTS tables"""
+    conn = engine.raw_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 def get_db():
     """Get database session"""

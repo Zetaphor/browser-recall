@@ -115,43 +115,50 @@ async def search_history(
     """Search history with optimized full-text search"""
     try:
         if search_term:
-            # Optimize FTS query with content-focused ranking
+            # Modified query to handle title-only searches better
             fts_query = """
                 WITH RECURSIVE
                 ranked_results AS (
-                    SELECT
-                        h.*,
-                        rank * (
-                            CASE
-                                -- Boost exact phrase matches in content
-                                WHEN h.markdown_content LIKE :exact_pattern THEN 3.0
-                                -- Boost title matches but less than content
-                                WHEN h.title LIKE :like_pattern THEN 1.5
-                                -- Base score for other matches
-                                ELSE 1.0
-                            END
-                        ) + (
-                            -- Additional boost for recent entries
+                    SELECT DISTINCT h.*,
+                        CASE
+                            -- Boost exact title matches highest
+                            WHEN h.title LIKE :exact_pattern THEN 4.0
+                            -- Boost title prefix matches
+                            WHEN h.title LIKE :prefix_pattern THEN 3.0
+                            -- Boost title contains matches
+                            WHEN h.title LIKE :like_pattern THEN 2.0
+                            -- Lower boost for content matches
+                            WHEN h.markdown_content IS NOT NULL AND (
+                                h.markdown_content LIKE :exact_pattern OR
+                                h.markdown_content LIKE :prefix_pattern OR
+                                h.markdown_content LIKE :like_pattern
+                            ) THEN 1.0
+                            ELSE 0.5
+                        END * (
                             CAST(strftime('%s', h.visit_time) AS INTEGER) /
-                            CAST(strftime('%s', 'now') AS INTEGER) * 0.5
+                            CAST(strftime('%s', 'now') AS INTEGER) * 0.5 + 1
                         ) as final_rank
                     FROM history h
-                    INNER JOIN history_fts f ON h.id = f.rowid
-                    WHERE history_fts MATCH :search
-                    AND (:domain IS NULL OR h.domain = :domain)
-                    AND (:start_date IS NULL OR h.visit_time >= :start_date)
-                    AND (:end_date IS NULL OR h.visit_time <= :end_date)
+                    LEFT JOIN history_fts f ON h.id = f.rowid
+                    WHERE
+                        h.title LIKE :like_pattern
+                        OR (h.markdown_content IS NOT NULL AND history_fts MATCH :search)
+                        AND (:domain IS NULL OR h.domain = :domain)
+                        AND (:start_date IS NULL OR h.visit_time >= :start_date)
+                        AND (:end_date IS NULL OR h.visit_time <= :end_date)
                 )
                 SELECT * FROM ranked_results
+                WHERE final_rank > 0
                 ORDER BY final_rank DESC
                 LIMIT 100
             """
 
-            # Prepare parameters with exact phrase matching
+            # Prepare search patterns for different matching strategies
             params = {
-                'search': search_term,
-                'like_pattern': f'%{search_term}%',
-                'exact_pattern': f'%{search_term}%',  # For exact phrase matching
+                'search': f'{search_term}*',  # Wildcard suffix matching
+                'like_pattern': f'%{search_term}%',  # Contains matching
+                'exact_pattern': search_term,  # Exact matching
+                'prefix_pattern': f'{search_term}%',  # Prefix matching
                 'domain': domain,
                 'start_date': start_date,
                 'end_date': end_date
