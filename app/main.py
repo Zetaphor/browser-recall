@@ -23,12 +23,14 @@ from .database import (
     get_last_processed_timestamp,
     update_last_processed_timestamp,
     create_tables,
-    engine
+    engine,
+    recreate_fts_tables
 )
 from .scheduler import HistoryScheduler
 from .page_info import PageInfo
 from .page_reader import PageReader
 from .config import Config
+from sqlalchemy.ext.declarative import declarative_base
 
 logger = setup_logger(__name__)
 
@@ -52,21 +54,45 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 async def startup_event():
     logger.info("Starting application")
 
-    # Create necessary tables
-    create_tables()
-
-    # Initial history and bookmark fetch
     try:
-        # Process history
+        # First create the base tables
+        logger.info("Creating base tables...")
+        create_tables()
+
+        # # Drop and recreate FTS tables
+        # logger.info("Recreating FTS tables...")
+        # with engine.connect() as conn:
+        #     # First check if the main history table exists
+        #     result = conn.execute(text(
+        #         "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"
+        #     )).fetchone()
+
+        #     if not result:
+        #         logger.info("Main history table doesn't exist yet, creating tables...")
+        #         Base.metadata.create_all(bind=engine)
+
+        #     # Now recreate FTS tables
+        #     logger.info("Dropping and recreating FTS tables...")
+        #     recreate_fts_tables()
+
+        #     logger.info("FTS tables recreation completed")
+
+        # Initial history and bookmark fetch
+        logger.info("Processing initial browser history...")
         process_browser_history()
 
-        # Process bookmarks
+        logger.info("Updating bookmarks...")
         await scheduler.update_bookmarks()
 
         # Start the background tasks
+        logger.info("Starting background tasks...")
         asyncio.create_task(scheduler.update_history())
+
+        logger.info("Startup completed successfully")
+
     except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
+        logger.error(f"Error during startup: {str(e)}", exc_info=True)
+        raise
 
 def serialize_history_entry(entry, include_content: bool = False):
     """Serialize a HistoryEntry object to a dictionary"""
@@ -105,71 +131,54 @@ def serialize_bookmark(bookmark):
 
 @app.get("/history/search")
 async def search_history(
+    query: Optional[str] = Query(None),
     domain: Optional[str] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    search_term: Optional[str] = Query(None),
     include_content: bool = Query(False),
     db: Session = Depends(get_db)
 ):
-    """Search history with optimized full-text search"""
+    """Search history using FTS5"""
     try:
-        if search_term:
-            # Modified query to handle title-only searches better
-            fts_query = """
-                WITH RECURSIVE
-                ranked_results AS (
-                    SELECT DISTINCT h.*,
-                        CASE
-                            -- Boost exact title matches highest
-                            WHEN h.title LIKE :exact_pattern THEN 4.0
-                            -- Boost title prefix matches
-                            WHEN h.title LIKE :prefix_pattern THEN 3.0
-                            -- Boost title contains matches
-                            WHEN h.title LIKE :like_pattern THEN 2.0
-                            -- Lower boost for content matches
-                            WHEN h.markdown_content IS NOT NULL AND (
-                                h.markdown_content LIKE :exact_pattern OR
-                                h.markdown_content LIKE :prefix_pattern OR
-                                h.markdown_content LIKE :like_pattern
-                            ) THEN 1.0
-                            ELSE 0.5
-                        END * (
-                            CAST(strftime('%s', h.visit_time) AS INTEGER) /
-                            CAST(strftime('%s', 'now') AS INTEGER) * 0.5 + 1
-                        ) as final_rank
-                    FROM history h
-                    LEFT JOIN history_fts f ON h.id = f.rowid
-                    WHERE
-                        h.title LIKE :like_pattern
-                        OR (h.markdown_content IS NOT NULL AND history_fts MATCH :search)
-                        AND (:domain IS NULL OR h.domain = :domain)
-                        AND (:start_date IS NULL OR h.visit_time >= :start_date)
-                        AND (:end_date IS NULL OR h.visit_time <= :end_date)
-                )
-                SELECT * FROM ranked_results
-                WHERE final_rank > 0
-                ORDER BY final_rank DESC
-                LIMIT 100
+        if query:
+            # Build the FTS query
+            fts_conditions = [f'title:{query}* OR markdown_content:{query}*']
+            params = {'query': query}
+
+            if domain:
+                fts_conditions.append(f'domain:"{domain}"')
+
+            fts_query = ' AND '.join(fts_conditions)
+
+            # Build the SQL query
+            sql = """
+                SELECT
+                    h.*,
+                    bm25(history_fts) as rank,
+                    highlight(history_fts, 0, '<mark>', '</mark>') as title_highlight,
+                    highlight(history_fts, 1, '<mark>', '</mark>') as content_highlight
+                FROM history_fts
+                JOIN history h ON history_fts.rowid = h.id
+                WHERE history_fts MATCH :fts_query
             """
 
-            # Prepare search patterns for different matching strategies
-            params = {
-                'search': f'{search_term}*',  # Wildcard suffix matching
-                'like_pattern': f'%{search_term}%',  # Contains matching
-                'exact_pattern': search_term,  # Exact matching
-                'prefix_pattern': f'{search_term}%',  # Prefix matching
-                'domain': domain,
-                'start_date': start_date,
-                'end_date': end_date
-            }
+            # Add date filters if provided
+            if start_date:
+                sql += " AND h.visit_time >= :start_date"
+                params['start_date'] = start_date
+            if end_date:
+                sql += " AND h.visit_time <= :end_date"
+                params['end_date'] = end_date
 
-            # Execute with connection context manager
-            with engine.connect() as connection:
-                results = connection.execute(text(fts_query), params).all()
-                return [serialize_history_entry(row, include_content) for row in results]
+            sql += " ORDER BY rank, h.visit_time DESC LIMIT 100"
+
+            params['fts_query'] = fts_query
+
+            results = db.execute(text(sql), params).fetchall()
+            return [serialize_history_entry(row, include_content) for row in results]
+
         else:
-            # Optimize non-FTS query
+            # Handle non-search queries
             query = db.query(HistoryEntry)
 
             if domain:
@@ -179,8 +188,6 @@ async def search_history(
             if end_date:
                 query = query.filter(HistoryEntry.visit_time <= end_date)
 
-            # Add index hints and limit
-            query = query.with_hint(HistoryEntry, 'INDEXED BY ix_history_visit_time', 'sqlite')
             entries = query.order_by(HistoryEntry.visit_time.desc()).limit(100).all()
             return [serialize_history_entry(entry, include_content) for entry in entries]
 

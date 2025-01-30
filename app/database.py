@@ -95,38 +95,40 @@ def init_fts():
     conn = engine.raw_connection()
     cursor = conn.cursor()
 
-    # Update FTS table configuration to use trigrams for better partial matching
+    # Create FTS table with content and title columns
     cursor.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
             title,
             markdown_content,
+            domain,  -- Add domain for filtering
+            visit_time UNINDEXED,  -- Add visit_time but don't index it
             content='history',
             content_rowid='id',
             tokenize='trigram'
         )
     """)
 
-    # Create triggers to keep FTS index up to date
+    # Update triggers to include domain and visit_time
     cursor.execute("""
         CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
-            INSERT INTO history_fts(rowid, title, markdown_content)
-            VALUES (new.id, new.title, new.markdown_content);
+            INSERT INTO history_fts(rowid, title, markdown_content, domain, visit_time)
+            VALUES (new.id, new.title, new.markdown_content, new.domain, new.visit_time);
         END;
     """)
 
     cursor.execute("""
         CREATE TRIGGER IF NOT EXISTS history_ad AFTER DELETE ON history BEGIN
-            INSERT INTO history_fts(history_fts, rowid, title, markdown_content)
-            VALUES('delete', old.id, old.title, old.markdown_content);
+            INSERT INTO history_fts(history_fts, rowid, title, markdown_content, domain, visit_time)
+            VALUES('delete', old.id, old.title, old.markdown_content, old.domain, old.visit_time);
         END;
     """)
 
     cursor.execute("""
         CREATE TRIGGER IF NOT EXISTS history_au AFTER UPDATE ON history BEGIN
-            INSERT INTO history_fts(history_fts, rowid, title, markdown_content)
-            VALUES('delete', old.id, old.title, old.markdown_content);
-            INSERT INTO history_fts(rowid, title, markdown_content)
-            VALUES (new.id, new.title, new.markdown_content);
+            INSERT INTO history_fts(history_fts, rowid, title, markdown_content, domain, visit_time)
+            VALUES('delete', old.id, old.title, old.markdown_content, old.domain, old.visit_time);
+            INSERT INTO history_fts(rowid, title, markdown_content, domain, visit_time)
+            VALUES (new.id, new.title, new.markdown_content, new.domain, new.visit_time);
         END;
     """)
 
@@ -199,3 +201,81 @@ def create_tables():
         db.commit()
     finally:
         db.close()
+
+def search_history(query, domain=None, start_date=None, end_date=None, db=None):
+    """
+    Search history using FTS5 with proper ranking
+    """
+    if db is None:
+        db = next(get_db())
+
+    try:
+        # Build the FTS query
+        fts_query = f'"{query}"'  # Exact phrase
+        if domain:
+            fts_query += f' AND domain:"{domain}"'
+
+        # Build date filter conditions
+        date_conditions = []
+        params = {'query': query}
+
+        if start_date:
+            date_conditions.append("visit_time >= :start_date")
+            params['start_date'] = start_date
+        if end_date:
+            date_conditions.append("visit_time <= :end_date")
+            params['end_date'] = end_date
+
+        date_filter = f"AND {' AND '.join(date_conditions)}" if date_conditions else ""
+
+        # Execute the search query
+        sql_query = f"""
+            SELECT
+                h.*,
+                bm25(history_fts) as rank,
+                highlight(history_fts, 0, '<mark>', '</mark>') as title_highlight,
+                highlight(history_fts, 1, '<mark>', '</mark>') as content_highlight
+            FROM history_fts
+            JOIN history h ON history_fts.rowid = h.id
+            WHERE history_fts MATCH :query
+            {date_filter}
+            ORDER BY rank, visit_time DESC
+            LIMIT 100
+        """
+
+        results = db.execute(text(sql_query), params).fetchall()
+        return results
+
+    except Exception as e:
+        print(f"Search error: {e}")
+        return []
+
+def recreate_fts_tables():
+    """Drop and recreate the FTS tables"""
+    conn = engine.raw_connection()
+    cursor = conn.cursor()
+    try:
+        # Drop existing FTS table and triggers
+        cursor.execute("DROP TRIGGER IF EXISTS history_ai")
+        cursor.execute("DROP TRIGGER IF EXISTS history_ad")
+        cursor.execute("DROP TRIGGER IF EXISTS history_au")
+        cursor.execute("DROP TABLE IF EXISTS history_fts")
+
+        # Recreate FTS tables and triggers
+        init_fts()
+
+        # Reindex all existing content
+        cursor.execute("""
+            INSERT INTO history_fts(rowid, title, markdown_content, domain, visit_time)
+            SELECT id, title, markdown_content, domain, visit_time FROM history
+        """)
+
+        conn.commit()
+        print("Successfully recreated FTS tables and reindexed content")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Error recreating FTS tables: {e}")
+    finally:
+        cursor.close()
+        conn.close()
