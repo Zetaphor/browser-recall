@@ -4,13 +4,19 @@ excluded_domains:
   - localhost
   - 127.0.0.1
 
-  # IP ranges
+  # Specific Domains / Subdomains
+  - ap.www.namecheap.com # Ignore this specific subdomain
+  - www.namecheap.com # Ignore the main domain (will cover /twofa/* path implicitly)
+  - login.linode.com # Ignore the login subdomain
+
+  # IP ranges (requires wildcard matching in config.py)
   - 192.168.*.*
   - 10.*.*.*
   - 172.16.*.*
-  - "0.0.0.*"
+  - 0.0.0.* # Note: Be careful with overly broad patterns
 
-  # Example wildcard patterns
+
+  # Example wildcard patterns (requires wildcard matching in config.py)
   # - *.local
-  # - reddit-*.com
   # - *.githubusercontent.com
+  # - *.google.com # Example: Ignore all google subdomains

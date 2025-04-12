@@ -2,6 +2,10 @@ import yaml
 from pathlib import Path
 from typing import Set
 import fnmatch
+import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Config:
     def __init__(self):
@@ -128,3 +132,120 @@ class ReaderConfig:
                 return False
 
         return True
+
+DEFAULT_CONFIG_PATH = 'config/reader_config.yaml'
+USER_CONFIG_DIR = os.path.expanduser("~/.config/browser-recall")
+USER_CONFIG_PATH = os.path.join(USER_CONFIG_DIR, 'reader_config.yaml')
+
+class Config:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(Config, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
+    def __init__(self, config_path=None):
+        if self._initialized:
+            return
+        self._initialized = True
+
+        self.config_path = self._determine_config_path(config_path)
+        self.config_data = self._load_config()
+        logger.info(f"Config initialized using: {self.config_path}")
+        # Pre-process excluded domains for faster lookup if needed,
+        # but direct iteration with fnmatch is often fine for moderate lists.
+        self.excluded_domains = self.config_data.get('excluded_domains', [])
+        # Ensure it's a list
+        if not isinstance(self.excluded_domains, list):
+            logger.warning(f"Excluded domains in config is not a list: {self.excluded_domains}. Ignoring.")
+            self.excluded_domains = []
+
+
+    def _determine_config_path(self, provided_path):
+        """Determine the correct config path to use."""
+        if provided_path and os.path.exists(provided_path):
+            return provided_path
+        if os.path.exists(USER_CONFIG_PATH):
+            return USER_CONFIG_PATH
+        if os.path.exists(DEFAULT_CONFIG_PATH):
+            return DEFAULT_CONFIG_PATH
+        logger.warning("No configuration file found at default or user locations. Using empty config.")
+        return None # Indicate no file was found
+
+    def _load_config(self):
+        """Loads the YAML configuration file."""
+        if not self.config_path:
+            return {} # Return empty dict if no config file path determined
+
+        try:
+            with open(self.config_path, 'r') as f:
+                return yaml.safe_load(f) or {} # Return empty dict if file is empty
+        except FileNotFoundError:
+            logger.warning(f"Configuration file not found at {self.config_path}. Using default settings.")
+            return {}
+        except yaml.YAMLError as e:
+            logger.error(f"Error parsing configuration file {self.config_path}: {e}")
+            return {} # Return empty dict on parsing error
+        except Exception as e:
+            logger.error(f"Unexpected error loading configuration {self.config_path}: {e}")
+            return {}
+
+    def get_config(self):
+        """Returns the loaded configuration data."""
+        return self.config_data
+
+    def reload_config(self):
+        """Reloads the configuration from the file."""
+        logger.info(f"Reloading configuration from: {self.config_path}")
+        self.config_data = self._load_config()
+        self.excluded_domains = self.config_data.get('excluded_domains', [])
+        if not isinstance(self.excluded_domains, list):
+            logger.warning(f"Excluded domains in reloaded config is not a list: {self.excluded_domains}. Ignoring.")
+            self.excluded_domains = []
+        logger.info("Configuration reloaded.")
+
+
+    def is_domain_ignored(self, domain: str) -> bool:
+        """
+        Checks if a given domain matches any pattern in the excluded_domains list.
+        Supports exact matches and wildcard (*) matching using fnmatch.
+        """
+        if not domain: # Ignore empty domains
+            return True
+        if not self.excluded_domains: # If list is empty, nothing is ignored
+             return False
+
+        # Normalize domain to lowercase for case-insensitive comparison
+        domain_lower = domain.lower()
+
+        for pattern in self.excluded_domains:
+            if not isinstance(pattern, str): # Skip non-string patterns
+                continue
+
+            # Normalize pattern to lowercase
+            pattern_lower = pattern.lower()
+
+            # Use fnmatch.fnmatch for wildcard support (*)
+            if fnmatch.fnmatch(domain_lower, pattern_lower):
+                # logger.debug(f"Domain '{domain}' ignored due to pattern '{pattern}'")
+                return True
+        return False
+
+    # --- Add methods to get specific config values safely ---
+    @property
+    def history_update_interval_seconds(self) -> int:
+        """Gets the history update interval, defaulting to 300."""
+        return self.config_data.get('history_update_interval_seconds', 300)
+
+    @property
+    def markdown_update_interval_seconds(self) -> int:
+        """Gets the markdown update interval, defaulting to 300."""
+        return self.config_data.get('markdown_update_interval_seconds', 300)
+
+    # Add other specific getters as needed
+    # Example:
+    # @property
+    # def some_other_setting(self) -> str:
+    #     return self.config_data.get('some_other_setting', 'default_value')

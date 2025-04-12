@@ -1,0 +1,20 @@
+[project]
+name = "browser-recall"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10.16"
+dependencies = [
+    "crawl4ai",
+    "fastapi",
+    "sqlalchemy",
+    "uvicorn",
+    "pytz",
+    "aiofiles",
+    "websockets",
+    "pyyaml",
+    "browser-history",
+    "pydantic",
+    "pydantic-settings",
+    "iso8601",
+]
