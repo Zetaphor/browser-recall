@@ -181,10 +181,20 @@ wheels = [
 ]
 
 [[package]]
+name = "browser-history"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/22/76d11c62a41f6deec0c176632dc0942f4cf250512c5fb8313af252fa7841/browser_history-0.4.1.tar.gz", hash = "sha256:21f2dd03127f835062ebd4852aeff80dc4afee25676eb08245c23fe94539aa5b", size = 30439 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/1b/127acd362c3a2ca23d2f9e4e46813e9fb7f36668d13e349b04b8bb5bd04d/browser_history-0.4.1-py3-none-any.whl", hash = "sha256:4fad5e59121f2d2e7e55db8a9ca70a8a5a53791a2f2dc354feeb348c1422b1cb", size = 21848 },
+]
+
+[[package]]
 name = "browser-recall"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "browser-history" },
     { name = "crawl4ai" },
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
@@ -192,6 +202,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "browser-history" },
     { name = "crawl4ai" },
     { name = "fastapi" },
     { name = "uvicorn", extras = ["standard"] },

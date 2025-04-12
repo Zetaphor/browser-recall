@@ -9,4 +9,5 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "crawl4ai",
+    "browser-history",
 ]
