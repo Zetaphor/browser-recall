@@ -7,5 +7,5 @@ cd (dirname (status filename))
 source (dirname (status filename))/.venv/bin/activate.fish
 python src/main.py > /dev/null 2>&1 &
 
-# Print a simple confirmation message
-echo "Browser Recall started in background with PID $!"
+# Print a simple confirmation message using the correct variable for the last PID
+echo "Browser Recall started in background with PID $last_pid"
