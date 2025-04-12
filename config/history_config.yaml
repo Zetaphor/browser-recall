@@ -6,7 +6,7 @@ excluded_domains:
   - "namecheap.com"
   - "us.ovhcloud.com"
   - "linode.com"
-  - "github.com/settings/"
+  - "github.com/settings"
   - "secure.backblaze.com"
   - "login."
   - "identity."

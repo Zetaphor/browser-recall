@@ -24,11 +24,9 @@ class BaseCrawler:
         if url.startswith("about:") or url.startswith("chrome:"):
             return True, "Browser internal URL"
 
-        domain = urlparse(url).netloc
-
-        # Check domain exclusions
-        if self.domain_exclusions.is_excluded(domain):
-            return True, "Excluded domain"
+        # Check domain exclusions using the full URL, not just the domain
+        if self.domain_exclusions.is_excluded(url):
+            return True, "Excluded domain/path"
 
         # Check if URL exists
         if self.db.url_exists(url):

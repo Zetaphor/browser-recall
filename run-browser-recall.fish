@@ -8,4 +8,4 @@ source (dirname (status filename))/.venv/bin/activate.fish
 python src/main.py > /dev/null 2>&1 &
 
 # Print a simple confirmation message
-echo "Browser Recall started in background"
+echo "Browser Recall started in background with PID $!"
