@@ -4,8 +4,8 @@
 cd (dirname (status filename))
 
 # Activate the virtual environment and run main.py silently
-source ./venv/bin/activate
-python main.py > /dev/null 2>&1 &
+source (dirname (status filename))/.venv/bin/activate.fish
+python src/main.py > /dev/null 2>&1 &
 
 # Print a simple confirmation message
 echo "Browser Recall started in background"
