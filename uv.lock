@@ -197,6 +197,7 @@ dependencies = [
     { name = "browser-history" },
     { name = "crawl4ai" },
     { name = "fastapi" },
+    { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -205,6 +206,7 @@ requires-dist = [
     { name = "browser-history" },
     { name = "crawl4ai" },
     { name = "fastapi" },
+    { name = "python-dotenv" },
     { name = "uvicorn", extras = ["standard"] },
 ]
 

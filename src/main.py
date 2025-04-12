@@ -10,8 +10,13 @@ from base_crawler import BaseCrawler
 import asyncio
 from contextlib import asynccontextmanager
 from browser_history import get_history
+from dotenv import load_dotenv
 # Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
+
+# Load environment variables
+load_dotenv()
+CRAWL_INTERVAL = int(os.getenv('CRAWL_INTERVAL', 30))  # Default to 30 seconds if not set
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,7 +67,7 @@ class HistoryCrawler(BaseCrawler):
             if success:
                 self.logger.info(f"Processed historical URL: {url}")
 
-            await asyncio.sleep(30)  # Wait 30 seconds before next crawl
+            await asyncio.sleep(CRAWL_INTERVAL)  # Use environment variable for interval
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

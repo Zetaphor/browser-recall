@@ -10,4 +10,5 @@ dependencies = [
     "uvicorn[standard]",
     "crawl4ai",
     "browser-history",
+    "python-dotenv"
 ]
