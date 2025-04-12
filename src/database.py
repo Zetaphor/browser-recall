@@ -46,6 +46,17 @@ class Database:
                 updated TIMESTAMP NOT NULL
             )
         ''')
+
+        # Add index on url column
+        self.cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_history_url ON history(url)
+        ''')
+
+        # Add unique index on url column
+        self.cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_history_url ON history(url)
+        ''')
+
         self.conn.commit()
 
     def add_history(self, url: str, title: str, content: str) -> int:
@@ -103,6 +114,11 @@ class Database:
             self.cursor.execute('DELETE FROM history WHERE id = ?', (id,))
             self.conn.commit()
             return self.cursor.rowcount > 0
+
+    def url_exists(self, url: str) -> bool:
+        """Check if a URL already exists in the database."""
+        self.cursor.execute('SELECT 1 FROM history WHERE url = ? LIMIT 1', (url,))
+        return self.cursor.fetchone() is not None
 
     def __del__(self):
         """Cleanup database connection."""

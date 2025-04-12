@@ -1,22 +1,17 @@
 # Domains to exclude from content reading
 excluded_domains:
-  # Local sites
-  - localhost
-  - 127.0.0.1
-
-  # Specific Domains / Subdomains
-  - ap.www.namecheap.com # Ignore this specific subdomain
-  - www.namecheap.com # Ignore the main domain (will cover /twofa/* path implicitly)
-  - login.linode.com # Ignore the login subdomain
-
-  # IP ranges (requires wildcard matching in config.py)
-  - 192.168.*.*
-  - 10.*.*.*
-  - 172.16.*.*
-  - 0.0.0.* # Note: Be careful with overly broad patterns
-
-
-  # Example wildcard patterns (requires wildcard matching in config.py)
-  # - *.local
-  # - *.githubusercontent.com
-  # - *.google.com # Example: Ignore all google subdomains
+  - "identity.getpostman.com"
+  - "localhost"
+  - "127.0.0.1"
+  - "ap.www.namecheap.com*"
+  - "*.namecheap.com*"
+  - "us.ovhcloud.com*"
+  - "cloud.linode.com*"
+  - "*.linode.com*"
+  - "linode.com*"
+  - "*.login.*"
+  - "*.auth.*"
+  - "192.168.*.*"
+  - "10.*.*.*"
+  - "172.16.*.*"
+  - "0.0.0.*"
