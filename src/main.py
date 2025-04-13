@@ -63,7 +63,7 @@ class HistoryCrawler(BaseCrawler):
                 self.logger.info(f"Skipping URL from history: {url} ({skip_reason})")
                 continue
 
-            success, result = await self.crawl_url(url, title)
+            success, result = await self.crawl_url(url, title, created_timestamp=timestamp)
             if success:
                 self.logger.info(f"Processed historical URL: {url}")
 

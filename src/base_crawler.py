@@ -1,9 +1,10 @@
-from typing import Tuple
+from typing import Tuple, Optional
 from urllib.parse import urlparse
 from database import Database
 from domain_exclusions import DomainExclusions
 from logger import Logger
 from crawl4ai import AsyncWebCrawler
+from datetime import datetime
 
 class BaseCrawler:
     def __init__(self, db: Database, domain_exclusions: DomainExclusions, logger: Logger):
@@ -34,7 +35,7 @@ class BaseCrawler:
 
         return False, ""
 
-    async def crawl_url(self, url: str, default_title: str = None) -> Tuple[bool, dict]:
+    async def crawl_url(self, url: str, default_title: str = None, created_timestamp: Optional[datetime] = None) -> Tuple[bool, dict]:
         try:
             result = await self.crawler.arun(url=url)
             crawl_result = result[0]
@@ -44,7 +45,8 @@ class BaseCrawler:
             self.db.add_history(
                 url=url,
                 title=title,
-                content=content
+                content=content,
+                created_timestamp=created_timestamp
             )
 
             return True, {

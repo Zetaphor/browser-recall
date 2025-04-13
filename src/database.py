@@ -59,14 +59,15 @@ class Database:
 
         self.conn.commit()
 
-    def add_history(self, url: str, title: str, content: str) -> int:
+    def add_history(self, url: str, title: str, content: str, created_timestamp: Optional[datetime] = None) -> int:
         """Add a new history entry."""
         now = datetime.utcnow()
+        created_time = created_timestamp if created_timestamp else now
         with self._lock:
             self.cursor.execute('''
                 INSERT INTO history (url, title, content, created, updated)
                 VALUES (?, ?, ?, ?, ?)
-            ''', (url, title, content, now, now))
+            ''', (url, title, content, created_time, now))
             self.conn.commit()
             return self.cursor.lastrowid
 
