@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Browser Recall Helper",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Sends page visited content to the browser recall server to be saved as markdown",
   "icons": {
     "48": "icon.png",
