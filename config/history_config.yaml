@@ -3,6 +3,7 @@ excluded_domains:
   - "identity.getpostman.com"
   - "localhost"
   - "127.0.0.1"
+  - "/settings"
   - "namecheap.com"
   - "us.ovhcloud.com"
   - "linode.com"
